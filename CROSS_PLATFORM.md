@@ -1,47 +1,32 @@
-# Cross-platform build notes (v0.2.1)
+# Cross-platform build notes (v0.2.2)
 
-Targets prepared by this source tree:
+This source follows Dusklight's current official mod-template target matrix:
 
-- Windows AMD64 (MSVC)
-- Linux x86_64 (Steam Deck)
-- Android ARM64 / arm64-v8a
+- Windows AMD64
+- Windows ARM64
+- Linux x86_64 (including Steam Deck)
+- Linux aarch64
+- macOS Apple Silicon (arm64)
+- macOS Intel (x86_64)
+- iOS arm64
+- Android aarch64 / arm64-v8a
 
-## Important audio note
+## Portable custom audio
 
-The v0.2.0 custom audio implementation synchronizes with Dusklight's JAS audio thread by resolving MSVC-decorated `JASCriticalSection` constructor/destructor symbols. Those names and that ABI are Windows-specific.
+Version 0.2.2 removes the old Windows-only custom-audio gate. Dusklight 2.0.2 implements `JASCriticalSection` as the guard for its recursive host audio mutex on native targets. The mod resolves that host constructor/destructor through `HookService` using platform-independent display names first, then exact MSVC or Itanium C++ ABI names only as a fallback.
 
-For safety, v0.2.1 keeps custom Kingdom Key WAV playback on MSVC/Windows and uses Twilight Princess' native sword sounds on Linux/Steam Deck and Android. The model, chain physics, KHIII visual effects, hit effects, shield gesture, shadows and reflections remain enabled.
+This keeps the Kingdom Key summon, dismiss and seven hit-family WAV cues synchronized with Dusklight's own JAS audio thread on supported targets. The audio resource registration itself continues to use `AudioResService`.
 
-Do not replace the non-Windows fallback with guessed Itanium/Android mangled names. Re-enable custom audio only after Dusklight exposes a platform-neutral synchronization API or after the exact symbol/ABI is verified for each target.
+If a future Dusklight build has a missing/stale symbol manifest or an audio sample cannot be registered, custom audio now fails soft: the weapon, physics and visual effects remain enabled and the game uses its native sword sounds instead.
 
-## GitHub Actions build
+## GitHub Actions
 
-Push this project to a GitHub repository. `.github/workflows/build.yml` builds all three targets and creates a `mod-combined` artifact containing a single multi-platform `.dusk`.
+`.github/workflows/build.yml` mirrors the official Dusklight mod-template platform matrix and merges successful per-platform bundles into one `mod-combined` artifact. It also includes `workflow_dispatch` so a build can be started manually from GitHub Actions.
 
-The combined package should contain native libraries under platform directories such as:
+The final combined `.dusk` should contain native libraries for each target under its `lib/` platform directory while sharing one copy of `res/` and `mod.json`.
 
-- `lib/windows-amd64/mod.dll`
-- `lib/linux-x86_64/mod.so`
-- `lib/android-aarch64/mod.so`
+`.gitattributes` and CMake's LF-normalized `mod.json` copy prevent the Windows CRLF mismatch that can otherwise make bundle merging fail.
 
-## Steam Deck
+## Notes
 
-Use the Linux build of Dusklight. Install the combined `.dusk` in:
-
-`~/.local/share/TwilitRealm/Dusklight/mods`
-
-## Android
-
-Use the ARM64 Dusklight build. Put the combined `.dusk` in the `mods` directory under Dusklight's selected data folder. Prefer Vulkan on supported devices; OpenGL ES is a best-effort fallback and may render custom effects differently.
-
-## Local builds
-
-A local build produces only the current host platform. The project can use an existing Dusklight checkout:
-
-`cmake -B build -DDUSKLIGHT_DIR=/path/to/dusklight`
-
-Then:
-
-`cmake --build build --parallel`
-
-For Android, use the Android NDK CMake toolchain with `ANDROID_ABI=arm64-v8a` and `ANDROID_PLATFORM=android-28`, matching the included CI workflow.
+A GitHub Actions matrix build proves that the source compiles and packages for a target; actual runtime behavior still needs device testing, especially custom audio and KHIII visual effects. GPU/backend behavior can vary by device and driver.

@@ -1,3 +1,18 @@
+# v0.2.2 portability validation
+
+This section records checks performed specifically for the v0.2.2 portability/audio patch. Historical validation below is retained from earlier Windows-focused iterations and should not be read as a runtime test of v0.2.2 on every platform.
+
+- `mod.json` parses successfully.
+- `.github/workflows/build.yml` parses successfully and contains the eight targets in Dusklight's current official mod-template matrix: Windows AMD64/ARM64, Linux x86_64/aarch64, macOS arm64/x86_64, iOS arm64, Android aarch64.
+- The project is pinned to the released Dusklight `v2.0.2` SDK.
+- The portable audio path resolves `JASCriticalSection` using platform-neutral HookService display names first, with MSVC and Itanium ABI fallbacks. If resolution/registration fails at runtime, the mod remains enabled and falls back to native sword audio.
+- CMake configure syntax was checked with a local stub SDK; configured `mod.json` contains LF line endings.
+- Existing standalone regressions were rerun after the patch: indexed mesh PASS (52,072 triangles), anchor interpolation PASS (42,000 cases), presence PASS (65,536 exhaustive sequences), procedural FX historical regression PASS, KHIII FX regression PASS (8,208,016 assertions), KHIII effect budget PASS, and chain-physics stress completed with zero non-finite positions.
+- The `res/` and sibling `model/` content are unchanged from v0.2.1; v0.2.2 changes source/build metadata rather than weapon/effect assets.
+- Full native compilation for all eight targets and runtime audio behavior still require the included GitHub Actions matrix and representative-device testing. Do not treat source-level validation as proof that every target's custom audio works until those tests pass.
+
+---
+
 # Validation status
 
 Target: mod v0.2.0 for Dusklight 2.0.3, Windows x64, D3D12. Updated 30 September 2026.

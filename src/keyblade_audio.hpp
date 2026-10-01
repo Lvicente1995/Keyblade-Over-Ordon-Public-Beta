@@ -1,6 +1,6 @@
 #pragma once
 
-// Independent native sound effects for Dusklight 2.0.3. WAV samples are owned
+// Independent native sound effects for Dusklight 2.0.2. WAV samples are owned
 // by AudioResService; JAISe supplies pause, SFX volume, distance and pan. No
 // original sound, instrument or music stream is replaced.
 #include "mods/svc/audio_res.h"
@@ -19,15 +19,12 @@
 
 namespace kingdom::audio {
 
-// The custom JAS bank registration currently relies on MSVC-only decorated
-// JASCriticalSection symbols in Dusklight 2.0.3. Keep it enabled on Windows
-// x64/MSVC, and gracefully fall back to native game sword audio elsewhere.
-#if defined(_MSC_VER)
-inline constexpr bool kNativeAudioSupported = true;
-#else
-inline constexpr bool kNativeAudioSupported = false;
-#endif
-
+// Dusklight 2.0.2 implements JASCriticalSection on every native host platform
+// as the guard for its recursive audio-thread mutex. Resolve those host
+// constructor/destructor symbols at runtime so the mod uses the *same* mutex
+// as the game without linking platform-specific C++ ABI symbols into the mod.
+// HookService display names are platform-independent; decorated-name fallbacks
+// cover constructors/destructors if a symbol manifest reports them ambiguously.
 enum class Cue : std::uint8_t { Summon, Dismiss, Hit, Hit2, Hit3, Hit4, Hit5, Hit6, Hit7, Count };
 constexpr std::size_t kCueCount=static_cast<std::size_t>(Cue::Count);
 
@@ -90,10 +87,55 @@ class System {
     std::size_t nextVoice_{};
     bool enabled_{};
     bool initialized_{};
+#if defined(_MSC_VER)
+    // MSVC constructors return `this` in the native ABI. The return value is
+    // intentionally ignored; the object exists only to enter the host mutex.
     using CriticalEnter=void*(*)(void*);
+#else
+    // Itanium C++ ABI constructors (Linux/Android/Apple) return void.
+    using CriticalEnter=void(*)(void*);
+#endif
     using CriticalExit=void(*)(void*);
     CriticalEnter criticalEnter_{};
     CriticalExit criticalExit_{};
+
+    static bool resolveCode(const HookService* hooks,ModContext* context,const char* symbol,void** out) {
+        if(!hooks||!context||!symbol||!out)return false;
+        HookSymbolFlags flags{};
+        return hooks->resolve(context,symbol,out,&flags)==MOD_OK
+            &&(*out)!=nullptr&&(flags&HOOK_SYMBOL_CODE)!=0;
+    }
+    bool resolveAudioLock(const HookService* hooks) {
+        void* enter=nullptr;void* leave=nullptr;
+
+        // Preferred path: Dusklight's platform-neutral demangled aliases.
+        if(resolveCode(hooks,context_,"JASCriticalSection::JASCriticalSection",&enter)
+            &&resolveCode(hooks,context_,"JASCriticalSection::~JASCriticalSection",&leave)) {
+            criticalEnter_=reinterpret_cast<CriticalEnter>(enter);
+            criticalExit_=reinterpret_cast<CriticalExit>(leave);
+            return true;
+        }
+
+        // Constructors/destructors can have multiple ABI symbols. If the
+        // display alias is ambiguous, use the exact native ABI spelling.
+#if defined(_MSC_VER)
+        constexpr const char* enterNames[]={"??0JASCriticalSection@@QEAA@XZ"};
+        constexpr const char* leaveNames[]={"??1JASCriticalSection@@QEAA@XZ"};
+#else
+        // Itanium ABI: C1/C2 are complete/base constructors; D1/D2 are the
+        // corresponding destructors. Dusklight's class has no virtual bases,
+        // so either emitted variant is suitable for this stack guard.
+        constexpr const char* enterNames[]={"_ZN18JASCriticalSectionC1Ev","_ZN18JASCriticalSectionC2Ev"};
+        constexpr const char* leaveNames[]={"_ZN18JASCriticalSectionD1Ev","_ZN18JASCriticalSectionD2Ev"};
+#endif
+        for(const char* name:enterNames)if(resolveCode(hooks,context_,name,&enter))break;
+        for(const char* name:leaveNames)if(resolveCode(hooks,context_,name,&leave))break;
+        if(!enter||!leave)return false;
+        criticalEnter_=reinterpret_cast<CriticalEnter>(enter);
+        criticalExit_=reinterpret_cast<CriticalExit>(leave);
+        return true;
+    }
+
     class AudioLock {
         System& owner_;
         alignas(JASCriticalSection) unsigned char storage_[sizeof(JASCriticalSection)]{};
@@ -145,29 +187,16 @@ public:
     System& operator=(const System&)=delete;
 
     // Call once during mod_initialize, before the host applies its service
-    // lifecycle. The 2.0.3 BST service only synchronizes additions reliably at
+    // lifecycle. The 2.0.x BST service synchronizes additions reliably at
     // this boundary. Files must be mono 16-bit PCM WAV, bundled under res/.
     // Returns how many cues loaded; a missing cue stays unavailable.
     unsigned initialize(ModContext* context,const AudioResService* service,const HookService* hooks) {
         if(initialized_||!context||!service||!hooks)return 0;
         initialized_=true;context_=context;service_=service;
-#if defined(_MSC_VER)
-        // These native audio-mutex wrappers are present in the 2.0.3 symbol
-        // manifest but absent from its import library. Their decorated names
-        // below are MSVC-specific, so this path is intentionally Windows-only.
-        // Linux/Android keep the rest of the mod active and use native sword
-        // sounds until Dusklight exposes a platform-neutral audio lock service.
-        void* enter=nullptr;void* leave=nullptr;HookSymbolFlags flags{};
-        if(hooks->resolve(context,"??0JASCriticalSection@@QEAA@XZ",&enter,&flags)!=MOD_OK
-            ||!(flags&HOOK_SYMBOL_CODE))return 0;
-        if(hooks->resolve(context,"??1JASCriticalSection@@QEAA@XZ",&leave,&flags)!=MOD_OK
-            ||!(flags&HOOK_SYMBOL_CODE))return 0;
-        criticalEnter_=reinterpret_cast<CriticalEnter>(enter);
-        criticalExit_=reinterpret_cast<CriticalExit>(leave);
-#else
-        (void)hooks;
-        return 0;
-#endif
+        // JASCriticalSection itself is not part of the mod import surface, so
+        // resolve the host implementation through HookService. This preserves
+        // the audio driver's synchronization on every supported native ABI.
+        if(!resolveAudioLock(hooks))return 0;
         {
             AudioLock lock(*this);
             // TP's own instrument banks occupy low indices. Claim a vacant
@@ -265,8 +294,8 @@ public:
             service_->remove_wave(context_,sound.wave);sound.wave=0;
         }
         // Sound-table additions are owned and removed by the host's mod-detach
-        // lifecycle. Do not call remove_sound_table: 2.0.3 indexes its SE ID
-        // allocator by effect ID rather than category in that function.
+        // lifecycle. Do not call remove_sound_table here; the host owns those
+        // additions and removes them when the mod detaches.
         for(auto& sound:sounds_)sound.ready=false;
         waves_.loaded.fill(false);bankSlot_=-1;
     }

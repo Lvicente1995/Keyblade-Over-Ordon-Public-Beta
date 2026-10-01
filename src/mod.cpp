@@ -694,20 +694,24 @@ MOD_EXPORT ModResult mod_initialize(ModError* error) {
     if(!kh3fx::loadAssets(svc_resource,mod_ctx,assetError))
         return mods::set_error(error,MOD_ERROR,assetError.c_str());
     ModResult result=MOD_OK;
-    if constexpr(audio::kNativeAudioSupported) {
-        result=mods::hook::add_pre<PrepareKeybladeSound>(onPrepareKeybladeSound);
-        if(result!=MOD_OK)return mods::set_error(error,result,"Could not attach custom Kingdom Key sounds.");
-        rollback.audioAttempted=true;
-        const unsigned loadedAudio=keybladeAudio.initialize(mod_ctx,svc_audio_res,svc_hook);
-        if(loadedAudio!=audio::kCueCount) {
-            return mods::set_error(error,MOD_ERROR,"Could not load all Kingdom Key sound samples.");
-        }
-        result=mods::hook::add_pre<SwordDrawSound>(onSwordSound);
-        if(result!=MOD_OK)return mods::set_error(error,result,"Could not replace the sword draw sound.");
-        result=mods::hook::add_pre<SwordReverbSound>(onSwordSound);
-        if(result!=MOD_OK)return mods::set_error(error,result,"Could not replace the sword dismissal sound.");
-    } else {
-        svc_log->warn(mod_ctx,"Kingdom Key custom audio is disabled on this platform; using native sword sounds.");
+    // The sequence hook is harmless when custom audio is unavailable: it
+    // simply continues to the original game implementation. Install it on all
+    // supported platforms and let the audio system resolve the host lock ABI.
+    result=mods::hook::add_pre<PrepareKeybladeSound>(onPrepareKeybladeSound);
+    if(result!=MOD_OK)return mods::set_error(error,result,"Could not attach custom Kingdom Key sounds.");
+    result=mods::hook::add_pre<SwordDrawSound>(onSwordSound);
+    if(result!=MOD_OK)return mods::set_error(error,result,"Could not attach the sword draw sound filter.");
+    result=mods::hook::add_pre<SwordReverbSound>(onSwordSound);
+    if(result!=MOD_OK)return mods::set_error(error,result,"Could not attach the sword dismissal sound filter.");
+
+    rollback.audioAttempted=true;
+    const unsigned loadedAudio=keybladeAudio.initialize(mod_ctx,svc_audio_res,svc_hook);
+    const bool customAudioReady=loadedAudio==audio::kCueCount;
+    if(!customAudioReady) {
+        // Do not make the weapon mod unusable if a future Dusklight build has
+        // a missing/stale symbol manifest or a sample cannot be loaded.
+        keybladeAudio.shutdown();
+        svc_log->warn(mod_ctx,"Kingdom Key custom audio could not initialize; using native sword sounds.");
     }
     result=mods::hook::add_pre<LinkExecute>(onExecuteStart);
     if(result!=MOD_OK)return mods::set_error(error,result,"Could not attach shield gesture timing.");
@@ -737,10 +741,10 @@ MOD_EXPORT ModResult mod_initialize(ModError* error) {
     if(result!=MOD_OK)return mods::set_error(error,result,"Could not attach Kingdom Key reflections.");
     result=mods::hook::replace<ShadowImageDraw>(onShadowImageDraw);
     if(result!=MOD_OK)return mods::set_error(error,result,"Could not attach Kingdom Key shadows.");
-    if constexpr(audio::kNativeAudioSupported)
-        svc_log->info(mod_ctx,"Kingdom Key v0.2.1 enabled: KHIII effects/audio, shield gesture, chain physics, and enemy impacts.");
+    if(customAudioReady)
+        svc_log->info(mod_ctx,"Kingdom Key v0.2.2 enabled: portable custom audio, KHIII effects, shield gesture, chain physics, and enemy impacts.");
     else
-        svc_log->info(mod_ctx,"Kingdom Key v0.2.1 enabled: cross-platform mode (native sword audio fallback), KHIII effects, shield gesture, chain physics, and enemy impacts.");
+        svc_log->info(mod_ctx,"Kingdom Key v0.2.2 enabled: native audio fallback, KHIII effects, shield gesture, chain physics, and enemy impacts.");
     rollback.committed=true;
     return MOD_OK;
 }

@@ -1,14 +1,12 @@
 # Kingdom Key — Ordon Sword
 
-Custom **v0.2.1** cross-platform source targeting the same Dusklight 2.0.3-era SDK revision as v0.2.0, prepared from the supplied `kingdomKey.fbx`. Windows retains the custom Kingdom Key audio path; Linux/Steam Deck and Android use native sword audio as a safe fallback.
+Custom **v0.2.2** cross-platform source for Dusklight 2.0.2, prepared from the supplied `kingdomKey.fbx`. The Kingdom Key custom summon, dismiss and hit audio now uses Dusklight's host audio lock through the cross-platform HookService resolver instead of an MSVC-only path.
 
 ## Install
 
-Copy `Kingdom-Key-Ordon-v0.2.0-win64.dusk` into `%APPDATA%\TwilitRealm\Dusklight\mods`, then enable **Kingdom Key — Ordon Sword** in Dusklight's mod menu. Equip the Ordon Sword. If Dusklight uses a custom user directory, use that directory's `mods` folder.
+Build the project with the included GitHub Actions workflow and download the `mod-combined` artifact. Inside is the universal `kingdom_key.dusk`; install that single file through Dusklight's mod manager/data-folder `mods` directory. Do not extract the `.dusk`. Remove older Kingdom Key versions so only one package with this mod ID is installed.
 
-When upgrading, remove the old Kingdom Key `.dusk` package from that folder before adding this one. Install only one version of this mod at a time. Close Dusklight first if its running copy locks the old package.
-
-The `.dusk` file is already the installable package; do not extract it. Disable it in the mod menu to return to the original sword. The game disc is not modified.
+The universal bundle is intended to contain native libraries for every target in Dusklight's official mod-template matrix while sharing one copy of `mod.json` and `res/`.
 
 ## Appearance and movement
 
@@ -25,7 +23,7 @@ The `.dusk` file is already the installable package; do not extract it. Disable 
 
 ## Current scope
 
-This is a custom v0.2.0 build. **The user confirmed the corrected draw/dismiss effects: “The effects look right now”.** The correction aligns the glow and spirals along the blade, restores material color, opacity and scrolling, and removes the old forced white flash over the whole weapon. Slower shield movement, audio and hit triggering were approved earlier; the latest shader changes were not separately retested on enemy hits. The corrected build passed the supported build script and reloaded without errors. Earlier Collection-preview checks ran at 60 FPS; this does not establish combat performance. Read `VALIDATION.md` for completed checks and remaining limits.
+This began as the custom v0.2.0 build and is now the v0.2.2 portability revision. **The user confirmed the corrected draw/dismiss effects: “The effects look right now”.** The correction aligns the glow and spirals along the blade, restores material color, opacity and scrolling, and removes the old forced white flash over the whole weapon. Slower shield movement, audio and hit triggering were approved earlier; the latest shader changes were not separately retested on enemy hits. The corrected build passed the supported build script and reloaded without errors. Earlier Collection-preview checks ran at 60 FPS; this does not establish combat performance. Read `VALIDATION.md` for completed checks and remaining limits.
 
 Sword damage, hitboxes, attack animations and attack trails retain Ordon behavior. Native equipment changes complete immediately while the cosmetic weapon transition and shield gesture run independently. The Keyblade hit effect/audio trigger is limited to confirmed, nonblocked enemy contacts and deduplicated per target per game tick. It replaces the native generic hitmark only for those accepted contacts; collision, damage and enemy reactions remain unchanged. Original draw/sheath sounds are suppressed when the replacement cue is available. Other game audio, inventory icons, item text and separate pickup/cutscene prop models retain their originals.
 
@@ -47,19 +45,29 @@ The original Twilight Princess ISO, original Dusklight installation and original
 
 ## Cross-platform support
 
-This source tree is prepared for Windows AMD64, Linux x86_64 (Steam Deck), and Android ARM64. See `CROSS_PLATFORM.md` for platform-specific notes. The included GitHub Actions workflow builds all three and merges them into one multi-platform `.dusk`.
+This source tree follows Dusklight's official mod-template matrix: Windows AMD64/ARM64, Linux x86_64/aarch64, macOS arm64/x86_64, iOS arm64, and Android aarch64. See `CROSS_PLATFORM.md` for details. GitHub Actions builds the platform libraries and merges them into one multi-platform `.dusk`.
 
 ## Build
 
-Use a Windows x64 MSVC developer environment and Python 3.8 or later. Obtain the official Dusklight source and its Aurora submodule at these revisions:
+The recommended distribution build is `.github/workflows/build.yml`. It follows Dusklight's current official mod-template matrix and creates per-platform artifacts for:
 
-- Dusklight v2.0.3: `40457c6adb381928e4b5fef6ed459ed291edd5e2`
-- Aurora: `3227d76c60e1e782ca576610bce61c9e7744d8be`
+- Windows AMD64 and ARM64
+- Linux x86_64 and aarch64
+- macOS Apple Silicon and Intel
+- iOS arm64
+- Android aarch64
 
-Run `tools/build_windows.ps1 -DusklightSource <source-folder> -ImportLibrary <Dusklight-install>\sdk\windows-amd64.lib` from a Visual Studio developer shell. The source does not require the game disc to compile. The native library must target the game's MSVC ABI; ordinary MinGW C++ ABI is not compatible.
+When every matrix job succeeds, `Combine bundles` creates the `mod-combined` artifact containing one universal `kingdom_key.dusk`. The workflow also supports manual runs through `workflow_dispatch`.
 
-Package contents are `mod.json`, `lib/windows-amd64/mod.dll`, and `res/`. The tested build script compiles against the official SDK and creates `build/mods/kingdom_key.dusk`. An optional CMake project is also included.
+The project pins the currently released Dusklight SDK tag `v2.0.2`. A local build can be made with:
 
-The `tools/` folder includes physics, geometry, interpolation, weapon-presence and shield-animation checks, with recorded results. `tools/kh3_fx_regression.cpp`, `tools/kh3_fx_budget.cpp` and `tools/kh3-fx-results.txt` cover the current KHIII effect simulation and render payload. The earlier procedural-particle checks remain as iteration history and do not validate the new renderer. Keep assertions enabled when running C++ tests. The source archive also includes the rigged Blender file, a studio preview and the geometry interchange files in its sibling `model/` folder.
+```sh
+cmake -B build
+cmake --build build --parallel
+```
 
-Official references: [modding API](https://github.com/TwilitRealm/dusklight/blob/v2.0.3/docs/modding.md), [game source](https://github.com/TwilitRealm/dusklight/tree/v2.0.3).
+A local build only produces a package for the current host/target; use the Actions matrix for distribution. `.gitattributes` and the LF-normalized configured `mod.json` prevent cross-platform metadata byte mismatches during bundle merging.
+
+The `tools/` folder contains the existing physics, geometry, interpolation, presence, shield-animation, and KHIII effect regression checks. Version 0.2.2 changes the audio portability layer and build matrix; successful CI compilation does not by itself prove runtime audio behavior on every device, so test the combined bundle on representative hardware.
+
+Official references: [Dusklight mod template](https://github.com/TwilitRealm/mod-template), [v2.0.2 modding API](https://github.com/TwilitRealm/dusklight/blob/v2.0.2/docs/modding.md).
